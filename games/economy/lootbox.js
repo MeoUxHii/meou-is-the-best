@@ -1,5 +1,5 @@
-
-const { EmbedBuilder } = require('discord.js');
+// Thêm ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType vào import
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const { SHOP_ITEMS, GEM_RATES, GEM_RATES_VIP, GEM_RATES_CRATE, GEM_RATES_CRATE_L, CURRENCY, GEM_PRICE_RANGES } = require('../../config');
 const economy = require('../../utils/economy');
 const { updateMissionProgress } = require('../mission'); 
@@ -57,7 +57,7 @@ function chunkArray(myArray, chunk_size){
     let tempArray = [];
     
     for (index = 0; index < arrayLength; index += chunk_size) {
-        myChunk = myArray.slice(index, index+chunk_size);
+        let myChunk = myArray.slice(index, index+chunk_size);
         tempArray.push(myChunk);
     }
     return tempArray;
@@ -116,6 +116,14 @@ async function openLootbox(message, userId, item, amount) {
     else if (item.id === 'crate') OPEN_ICON = '<a:crateopen:1461620332510052446>';
     else if (item.id === 'crateL') OPEN_ICON = '<a:crateLpopen:1463843469415026784>';
 
+    // --- TẠO NÚT SKIP ---
+    const skipButton = new ButtonBuilder()
+        .setCustomId(`skip_lootbox_${userId}`)
+        .setLabel('Bỏ qua (Skip)')
+        .setStyle(ButtonStyle.Primary) // Màu xanh dương
+        .setEmoji('<a:bye:1469437719233953914>');
+
+    const actionRow = new ActionRowBuilder().addComponents(skipButton);
     
     const embed = new EmbedBuilder()
         .setColor('Gold') 
@@ -126,31 +134,25 @@ async function openLootbox(message, userId, item, amount) {
             `Đang chuẩn bị...`
         );
     
-    
     let msg;
     try {
-        msg = await message.reply({ embeds: [embed] });
+        // Gửi tin nhắn kèm theo nút Skip
+        msg = await message.reply({ embeds: [embed], components: [actionRow] });
     } catch (err) {
         console.error("Không gửi được tin nhắn mở hòm:", err);
         openingSessions.delete(userId);
         return; 
     }
-
-    
     
     try {
         const rewardSummary = {};
         
-        
         for (const gem of allRewards) {
             rewardSummary[gem.id] = (rewardSummary[gem.id] || 0) + 1;
         }
-
         
         const dbPromises = Object.entries(rewardSummary).map(async ([gemId, count]) => {
-            
             await economy.addItem(userId, gemId, count);
-            
             
             if (item.id === 'lootboxvip' && ['gem6', 'gem7'].includes(gemId)) {
                 await updateMissionProgress(userId, 'open_gem_vip', count);
@@ -160,9 +162,6 @@ async function openLootbox(message, userId, item, amount) {
                 await updateMissionProgress(userId, 'open_crate_legend', count);
             }
 
-            
-            
-            
             for(let k=0; k<count; k++) {
                  economy.logGemHistory(userId, gemId, SHOP_ITEMS[gemId].name).catch(console.error);
             }
@@ -172,26 +171,64 @@ async function openLootbox(message, userId, item, amount) {
 
     } catch (e) {
         console.error("Lỗi cập nhật DB:", e);
-        msg.edit({ content: "⚠️ Có lỗi khi lưu vật phẩm, vui lòng báo admin!" });
+        msg.edit({ content: "⚠️ Có lỗi khi lưu vật phẩm, vui lòng báo admin!", components: [] });
         openingSessions.delete(userId);
         return;
     }
 
-    
+    // --- LOGIC SKIP & ANIMATION ---
+    let isSkipped = false;
+    let skipResolver = null;
+    let timeoutId = null;
+
+    // Hàm chờ có thể bị ngắt ngang
+    const interruptibleWait = (ms) => {
+        return new Promise(resolve => {
+            skipResolver = resolve;
+            timeoutId = setTimeout(() => {
+                skipResolver = null;
+                resolve();
+            }, ms);
+        });
+    };
+
+    // Lắng nghe sự kiện bấm nút Skip
+    const collector = msg.createMessageComponentCollector({
+        componentType: ComponentType.Button,
+        time: 300000 // Chạy tối đa 5 phút
+    });
+
+    collector.on('collect', async (interaction) => {
+        if (interaction.customId === `skip_lootbox_${userId}`) {
+            if (interaction.user.id !== userId) {
+                return interaction.reply({ content: "Không thể thực hiện hành động do không phải hòm của bạn!", ephemeral: true });
+            }
+            isSkipped = true; // Đánh dấu đã skip
+            await interaction.deferUpdate(); // Phản hồi để discord không báo lỗi "Interaction Failed"
+            
+            // Ngắt ngang tiến trình chờ hiện tại
+            if (skipResolver) {
+                clearTimeout(timeoutId);
+                skipResolver(); 
+            }
+            collector.stop();
+        }
+    });
+
     try {
         const BATCH_SIZE = 5; 
         const batches = chunkArray(allRewards, BATCH_SIZE);
         let accumulatedGems = [];
         
-        
         for (let i = 0; i < batches.length; i++) {
+            if (isSkipped) break; // Thoát vòng lặp ngay nếu đã bấm Skip
+
             const currentBatch = batches[i];
             const currentCount = currentBatch.length;
             const isFirstBatch = (i === 0);
             
             const remainingCount = amount - (accumulatedGems.length + currentCount);
 
-            
             const openingIconsStr = '| ' + Array(currentCount).fill(OPEN_ICON).join(' | ') + ' |';
             const receivedStr = accumulatedGems.length > 0 ? formatGemGrid(accumulatedGems) : "";
             
@@ -209,10 +246,10 @@ async function openLootbox(message, userId, item, amount) {
 
             await msg.edit({ embeds: [EmbedBuilder.from(embed).setDescription(descPhase1)] });
 
-            
-            await new Promise(r => setTimeout(r, currentCount * 1000));
+            // Chờ nhưng có thể bị ngắt bằng nút Skip
+            await interruptibleWait(currentCount * 1000);
+            if (isSkipped) break;
 
-            
             accumulatedGems = accumulatedGems.concat(currentBatch);
             
             const updatedReceivedStr = formatGemGrid(accumulatedGems);
@@ -225,18 +262,22 @@ async function openLootbox(message, userId, item, amount) {
 
             await msg.edit({ embeds: [EmbedBuilder.from(embed).setDescription(descPhase2)] });
 
-            
             if (remainingCount > 0) {
-                await new Promise(r => setTimeout(r, 1000));
+                await interruptibleWait(1000);
             }
         }
-        let totalMaxValue = 0;
-            allRewards.forEach(gem => {
-                const maxPrice = GEM_PRICE_RANGES[gem.id] ? GEM_PRICE_RANGES[gem.id].max : 0;
-                totalMaxValue += maxPrice;
-            });
         
-        const finalGrid = formatGemGrid(accumulatedGems);
+        collector.stop(); // Dừng lắng nghe nút khi animation kết thúc (hoặc bị skip)
+
+        // Tính tổng giá trị max của ngọc
+        let totalMaxValue = 0;
+        allRewards.forEach(gem => {
+            const maxPrice = GEM_PRICE_RANGES[gem.id] ? GEM_PRICE_RANGES[gem.id].max : 0;
+            totalMaxValue += maxPrice;
+        });
+        
+        // Hiển thị toán bộ grid ngọc (Dùng allRewards để đảm bảo nếu Skip thì vẫn hiển thị đủ 100%)
+        const finalGrid = formatGemGrid(allRewards);
         const finalDescription = 
             `------------------------------------------------\n` +
             `<@${userId}> đã tiến hành mở **${amount}** ${boxIcon} **${boxName}**\n\n` +
@@ -248,9 +289,11 @@ async function openLootbox(message, userId, item, amount) {
             .setTitle('**Mở Hòm Hoàn Tất**')
             .setDescription(finalDescription)
             .setFooter({ 
-                    text: `Tổng giá trị ngọc khi giá tối đa: ${totalMaxValue.toLocaleString('vi-VN')} ${CURRENCY}` 
-                });
-        await msg.edit({ embeds: [finalEmbed] });
+                text: `Tổng giá trị ngọc khi giá tối đa: ${totalMaxValue.toLocaleString('vi-VN')} ${CURRENCY}` 
+            });
+            
+        // Edit lần cuối và xóa nút (components: [])
+        await msg.edit({ embeds: [finalEmbed], components: [] });
 
     } catch (e) {
         console.error("[Lootbox] Error during animation:", e);
