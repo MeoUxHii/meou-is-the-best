@@ -84,37 +84,58 @@ client.on(Events.MessageCreate, async (message) => {
     const userId = message.author.id;
     handleLevelSystem(message).catch(err => console.error("Level Error:", err));
     
-    
     const contentLower = message.content.toLowerCase().trim();
     if (contentLower !== 'meoutest' && contentLower !== 'meoutestvip') {
         const now = Date.now();
         let tracker = dropTracking.get(userId);
      
         const nextHour = new Date();
-        nextHour.setHours(nextHour.getHours() + 1);
-        nextHour.setMinutes(0, 0, 0);
+        nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
         const nextHourTimestamp = nextHour.getTime();
+
+        const nextDay = new Date();
+        nextDay.setHours(24, 0, 0, 0); // Reset vào 0h ngày hôm sau
+        const nextDayTimestamp = nextDay.getTime();
    
-        if (!tracker || now > tracker.resetTime) {
+        // Khởi tạo hoặc cập nhật bộ đếm Tracker
+        if (!tracker) {
             tracker = { 
                 count: 0, 
                 resetTime: nextHourTimestamp, 
-                lastDropTime: 0           
+                dailyCount: 0,
+                dailyResetTime: nextDayTimestamp,
+                lastDropTime: 0            
             };
             dropTracking.set(userId, tracker);
+        } else {
+            // Reset giờ nếu đã qua giờ mới
+            if (now > tracker.resetTime) {
+                tracker.count = 0;
+                tracker.resetTime = nextHourTimestamp;
+            }
+            // Reset ngày nếu đã qua ngày mới
+            if (now > tracker.dailyResetTime) {
+                tracker.dailyCount = 0;
+                tracker.dailyResetTime = nextDayTimestamp;
+            }
         }
         
-        if (tracker.count < 10 && (now - tracker.lastDropTime >= 60000)) {
+        // Cập nhật Logic: Tối đa 5 hòm/giờ và 20 hòm/ngày, delay 60s
+        if (tracker.count < 5 && tracker.dailyCount < 20 && (now - tracker.lastDropTime >= 60000)) {
             const chance = Math.random();
             let droppedItem = null;
-            if (chance < 0.05) { droppedItem = 'lootboxvip'; }      
-            else if (chance < 0.20) { droppedItem = 'lootbox'; }    
+            
+            // 1% Hòm VIP, 5% Hòm thường
+            if (chance < 0.01) { droppedItem = 'lootboxvip'; }      
+            else if (chance < 0.06) { droppedItem = 'lootbox'; } // Từ 0.01 đến 0.06 là 5%
 
             if (droppedItem) {
                 tracker.count++;
+                tracker.dailyCount++; // Tăng thêm bộ đếm ngày
                 tracker.lastDropTime = now;
                 
                 await economy.addItem(userId, droppedItem, 1);
+                // Truyền tracker hiện tại (chỉ in count/giờ ra) để user không biết dailyCount
                 sendLootboxMessage(message.channel, message.member || message.author, droppedItem, tracker);
             }
         }
@@ -122,7 +143,6 @@ client.on(Events.MessageCreate, async (message) => {
     
     
     if (!message.content.startsWith(prefix)) {
-        
         
         let testItem = null;
         if (contentLower === 'meoutest') testItem = 'lootbox';
