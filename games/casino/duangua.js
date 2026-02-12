@@ -20,7 +20,7 @@ async function startRace(message) {
     const channel = message.channel;
 
     const TRACK_LENGTH = GAME_CONFIG.raceTrackLength || 28;
-    const PAYOUT_RATE = GAME_CONFIG.racePayoutRate || 3;
+    const PAYOUT_RATE = GAME_CONFIG.racePayoutRate || 5;
     const MIN_BET = GAME_CONFIG.minBetRace || 100;
     const MAX_BET = GAME_CONFIG.maxBetRace || 5000;
 
