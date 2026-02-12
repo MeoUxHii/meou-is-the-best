@@ -4,7 +4,7 @@ const { SHOP_ITEMS, CURRENCY } = require('../config');
 
 const xpCooldowns = new Map();
 const COOLDOWN_SECONDS = 20; 
-const DAILY_LIMIT = 2000;
+const DAILY_LIMIT = 1000;
 const DAILY_BONUS = 50;
 
 function getRequiredXP(level) {
