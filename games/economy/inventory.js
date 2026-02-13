@@ -2,7 +2,7 @@ const { EmbedBuilder } = require('discord.js');
 const { SHOP_ITEMS } = require('../../config');
 const economy = require('../../utils/economy');
 const { findItemSmart, resolveGlobalUser } = require('../../utils/helpers');
-const { updateMissionProgress } = require('../mission'); // <--- IMPORT MISSION
+const { updateMissionProgress } = require('../mission'); 
 
 // ID CỦA BẠN
 const OWNER_ID = '414792622289190917';
@@ -41,6 +41,7 @@ async function handleInventory(message, args = []) {
     let specialGems = []; // Mục riêng cho Ngọc Đặc Biệt
     let lootboxGems = [];
     let crateGems = [];
+    let totalGemValue = 0; // Biến tính tổng giá trị ngọc
 
     const getGemRank = (id) => {
         // Xử lý rank cho gem thường và gem_special (nếu cần sort sau này)
@@ -57,6 +58,15 @@ async function handleInventory(message, args = []) {
             emoji: itemConfig.emoji || '',
             rank: getGemRank(invItem.item_id)
         };
+
+        // --- Logic tính tổng giá trị ngọc ---
+        // Kiểm tra xem item có phải là gem không (bắt đầu bằng 'gem')
+        if (invItem.item_id.startsWith('gem')) {
+            // Lấy max_price nếu có, nếu không thì lấy price thường, mặc định là 0
+            const price = itemConfig.max_price || itemConfig.price || 0;
+            totalGemValue += price * invItem.amount;
+        }
+        // ------------------------------------
 
         // Logic phân loại mới
         if (invItem.item_id === 'gem_special') {
@@ -104,12 +114,19 @@ async function handleInventory(message, args = []) {
 
     if (!description) description = "Lỗi hiển thị vật phẩm.";
 
+    // Format số tiền (ví dụ: 100,000)
+    const formattedValue = totalGemValue.toLocaleString('vi-VN');
+    
+    // Thay đổi icon coin ở đây nếu bạn có ID emoji riêng (ví dụ: <:coin:123456...>)
+    const coinEmoji = '🪙'; 
+
     const embed = new EmbedBuilder()
         .setColor('Gold')
         .setTitle(`**Hòm Đồ Của ${displayName}**`)
         .setDescription(description)
         .setThumbnail(avatarUrl)
-        .setFooter({ text: "Sử dụng .use <tên item> để dùng hoặc .sell <tên item> để bán" });
+        // CẬP NHẬT FOOTER THEO YÊU CẦU
+        .setFooter({ text: `Tổng giá trị ngọc khi đạt giá tối đa: ${formattedValue} ${coinEmoji}` });
         
     return message.channel.send({ embeds: [embed] });
 }
